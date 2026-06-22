@@ -192,7 +192,9 @@ def main() -> None:
             "yasso_totc": 16.0,
             "yasso_cn_input": 50.0,
             "yasso_fract_root": 0.6,
-            "yasso_fract_legacy": 0.3,
+            # The JAX replay (and the Fortran reference fixture) run with a
+            # zero legacy fraction; keep this 0.0 so the honored value matches.
+            "yasso_fract_legacy": 0.0,
         },
         "hourly": hourly,
         "daily": daily,
