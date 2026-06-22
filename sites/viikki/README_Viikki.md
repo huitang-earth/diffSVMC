@@ -237,18 +237,26 @@ print('ndays', d['site']['ndays'], '| nhours', d['site']['nhours'], \
 ```bash
 mkdir -p sites/viikki/results
 
-# Full run, JSON + CSV output:
+# Full run: daily JSON + daily CSV + per-hour CSV:
 python scripts/run_site.py \
-    --site sites/viikki/viikki.json \
-    --output sites/viikki/results/viikki_results.json \
-    --csv    sites/viikki/results/viikki_results.csv
+    --site       sites/viikki/viikki.json \
+    --output     sites/viikki/results/viikki_results.json \
+    --csv        sites/viikki/results/viikki_results.csv \
+    --hourly-csv sites/viikki/results/viikki_hourly.csv
 ```
 
-Useful options:
+Output options (specify at least one):
+
+| flag | writes |
+|------|--------|
+| `--output PATH` | per-**day** outputs as JSON |
+| `--csv PATH` | per-**day** outputs as CSV (`cstate` expanded to `cstate_a/w/e/n/h`) |
+| `--hourly-csv PATH` | per-**hour** diagnostics as CSV (one row per hour) |
+
+Other options:
 
 - `--ndays N` — run only the first `N` days (handy for a quick check, e.g.
-  `--ndays 30`).
-- Supply just `--output` or just `--csv` if you only want one format.
+  `--ndays 30`). Applies to daily and hourly output alike.
 
 You'll see:
 
@@ -257,6 +265,7 @@ You'll see:
 [run_site] Done in <…>s
 [run_site] Wrote sites/viikki/results/viikki_results.json (1095 days)
 [run_site] Wrote sites/viikki/results/viikki_results.csv (1095 days)
+[run_site] Wrote sites/viikki/results/viikki_hourly.csv (26280 hours)
 ```
 
 > The `float64 will be truncated` warnings printed during import are harmless —
@@ -286,6 +295,36 @@ Quick sanity checks:
   expected only for trivial/placeholder forcing).
 - `wliq` should track precipitation; `psi` (soil water potential) stays ≤ 0.
 
+### Hourly output (`--hourly-csv`)
+
+One row per hour, with `timestamp, day, hour` followed by these columns:
+
+| column | meaning | units |
+|--------|---------|-------|
+| `GPP` | gross primary production | model units (same quantity `gpp_avg` averages) |
+| `stomatal_conductance` | stomatal conductance (`gs`) | mol m⁻² s⁻¹ |
+| `Jmax` | max electron transport rate | µmol m⁻² s⁻¹ |
+| `Vcmax` | max carboxylation rate | µmol m⁻² s⁻¹ |
+| `Chi` | leaf cᵢ:cₐ ratio | – |
+| `Dpsi` | soil-to-leaf water-potential drop | MPa |
+| `Profit` | P-Hydro objective | – |
+| `Evap` | total evapotranspiration flux | mm s⁻¹ |
+| `Transp` | transpiration flux | mm s⁻¹ |
+| `CanopyEvap` | canopy evaporation flux | mm s⁻¹ |
+| `GroundEvap` | soil/ground evaporation flux | mm s⁻¹ |
+
+```bash
+column -t -s, sites/viikki/results/viikki_hourly.csv | head -5
+```
+
+Notes:
+
+- Night / no-light hours: `GPP`, `stomatal_conductance`, `Vcmax`, `Transp` are
+  zeroed by the model's light guard; `Jmax`, `Chi`, `Dpsi`, `Profit` are the
+  raw P-Hydro optimizer values and may carry small noise at night.
+- The four flux columns are per-second rates (the per-step accumulation divided
+  by `time_step·3600`), matching the Fortran hourly output.
+
 
 ---
 
@@ -297,8 +336,9 @@ sites/viikki/
 ├── viikki.build.json      # Step 2 — build config
 ├── viikki.json            # Step 3 — generated site reference
 └── results/
-    ├── viikki_results.json
-    └── viikki_results.csv
+    ├── viikki_results.json     # daily, JSON
+    ├── viikki_results.csv      # daily, CSV
+    └── viikki_hourly.csv       # per-hour diagnostics (--hourly-csv)
 ```
 
 That's it — once `viikki.json` exists, re-running is just Step 4.

@@ -106,6 +106,21 @@ class DailyForcing(NamedTuple):
     management_c_out: jax.Array  # scalar
 
 
+class HourlyOutput(NamedTuple):
+    """Per-hour diagnostic outputs (stacked to (n_days, 24) after the scans)."""
+    gpp: jax.Array                  # per-hour GPP (model units, guarded at night)
+    stomatal_conductance: jax.Array # gs (guarded at night)
+    jmax: jax.Array                 # P-Hydro Jmax
+    vcmax: jax.Array                # Vcmax (guarded at night)
+    chi: jax.Array                  # ci:ca ratio
+    dpsi: jax.Array                 # soil-leaf water potential difference
+    profit: jax.Array               # P-Hydro profit (objective)
+    evap: jax.Array                 # ET flux (mm s-1) = ET / (time_step*3600)
+    transp: jax.Array               # transpiration flux (mm s-1)
+    canopy_evap: jax.Array          # canopy evaporation flux (mm s-1)
+    ground_evap: jax.Array          # ground/soil evaporation flux (mm s-1)
+
+
 class DailyOutput(NamedTuple):
     """Per-day outputs for validation against the integration fixture."""
     gpp_avg: jax.Array
@@ -124,6 +139,7 @@ class DailyOutput(NamedTuple):
     psi: jax.Array
     cstate: jax.Array          # (5,) AWENH pools
     et_total: jax.Array        # daily accumulated ET (mm)
+    hourly: HourlyOutput       # per-hour diagnostics, each field shape (24,)
 
 
 class IntegrationForcing(NamedTuple):
@@ -312,7 +328,7 @@ def _make_hourly_step(
     latflow = jnp.asarray(0.0)
     false_scalar = jnp.asarray(False)
 
-    def hourly_step(carry: HourlyCarry, forcing: jax.Array) -> tuple[HourlyCarry, None]:
+    def hourly_step(carry: HourlyCarry, forcing: jax.Array) -> tuple[HourlyCarry, HourlyOutput]:
         """One hourly time step: P-Hydro → water balance → met smoothing → accumulate.
 
         Args:
@@ -348,6 +364,10 @@ def _make_hourly_step(
         aj = phydro_result.aj
         gs = phydro_result.gs
         vcmax_hr = phydro_result.vcmax
+        jmax_hr = phydro_result.jmax
+        chi_hr = phydro_result.chi
+        dpsi_hr = phydro_result.dpsi
+        profit_hr = phydro_result.profit
 
         # GPP (T/ha equivalent units: mol/m²/s → T C /ha)
         # gpp_hr = (aj + rdark * vcmax_hr) * c_molmass * 1e-6 * 1e-3 * lai
@@ -427,7 +447,25 @@ def _make_hourly_step(
             num_vcmax=new_num_vcmax,
             et_acc=carry.et_acc + et_hr,
         )
-        return new_carry, None
+
+        # ── Per-hour diagnostic outputs ──
+        # Flux rates: convert per-step accumulations (mm over the step) to mm s-1
+        # by dividing by (time_step * 3600), matching the Fortran hourly output.
+        step_seconds = _TIME_STEP * 3600.0
+        hourly_out = HourlyOutput(
+            gpp=gpp_hr,
+            stomatal_conductance=gs_guarded,
+            jmax=jmax_hr,
+            vcmax=vcmax_guarded,
+            chi=chi_hr,
+            dpsi=dpsi_hr,
+            profit=profit_hr,
+            evap=et_hr / step_seconds,
+            transp=tr_spafhy / step_seconds,
+            canopy_evap=cw_flux.CanopyEvap / step_seconds,
+            ground_evap=cw_flux.SoilEvap / step_seconds,
+        )
+        return new_carry, hourly_out
 
     return hourly_step
 
@@ -510,8 +548,10 @@ def _make_daily_step(
             et_acc=zero,
         )
 
-        # Run 24 hourly steps
-        final_hourly, _ = jax.lax.scan(hourly_step, hourly_init, forcing.hourly_driver)
+        # Run 24 hourly steps; hourly_outs has each field stacked to (24,)
+        final_hourly, hourly_outs = jax.lax.scan(
+            hourly_step, hourly_init, forcing.hourly_driver
+        )
 
         # ── Daily averages ──
         temp_avg = final_hourly.temp_acc / 24.0
@@ -636,6 +676,7 @@ def _make_daily_step(
             psi=final_hourly.sw_state.Psi,
             cstate=new_cstate,
             et_total=final_hourly.et_acc,
+            hourly=hourly_outs,
         )
 
         return new_carry, output

@@ -38,8 +38,24 @@ SCALAR_KEYS = (
 )
 
 
-def run_site(ref: dict, ndays: int) -> list[dict]:
-    """Run the JAX integration for *ndays* and return per-day record dicts."""
+# Hourly outputs: (CSV column name, HourlyOutput field).
+HOURLY_COLUMNS = (
+    ("GPP", "gpp"),
+    ("stomatal_conductance", "stomatal_conductance"),
+    ("Jmax", "jmax"),
+    ("Vcmax", "vcmax"),
+    ("Chi", "chi"),
+    ("Dpsi", "dpsi"),
+    ("Profit", "profit"),
+    ("Evap", "evap"),
+    ("Transp", "transp"),
+    ("CanopyEvap", "canopy_evap"),
+    ("GroundEvap", "ground_evap"),
+)
+
+
+def run_site(ref: dict, ndays: int):
+    """Run the JAX integration for *ndays*; return (per-day records, model output)."""
     print(f"[run_site] Running integration for {ndays} days …")
     t0 = time.time()
     _final_carry, out = run_integration(**build_run_kwargs(ref, ndays))
@@ -55,7 +71,7 @@ def run_site(ref: dict, ndays: int) -> list[dict]:
             record[key] = float(getattr(out, key)[i])
         record["cstate"] = [float(x) for x in out.cstate[i]]
         records.append(record)
-    return records
+    return records, out
 
 
 def write_csv(records: list[dict], path: Path) -> None:
@@ -73,6 +89,38 @@ def write_csv(records: list[dict], path: Path) -> None:
             writer.writerow(row)
 
 
+def write_hourly_csv(out, ref: dict, ndays: int, path: Path) -> int:
+    """Write per-hour diagnostics (one row per hour) to CSV.
+
+    ``out.hourly`` holds each variable stacked to shape (ndays, 24). Rows are
+    emitted day-major then hour-of-day, aligned to the site's hourly timestamps.
+    """
+    import numpy as np
+
+    hourly = out.hourly
+    # Materialize each field as a (ndays, 24) numpy array once.
+    cols = {name: np.asarray(getattr(hourly, field))[:ndays]
+            for name, field in HOURLY_COLUMNS}
+    timestamps = ref.get("hourly", {}).get("timestamps")
+
+    fieldnames = ["timestamp", "day", "hour"] + [name for name, _ in HOURLY_COLUMNS]
+    n = 0
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for i in range(ndays):
+            for h in range(24):
+                idx = i * 24 + h
+                row = {"day": i + 1, "hour": h}
+                if timestamps is not None and idx < len(timestamps):
+                    row["timestamp"] = timestamps[idx]
+                for name, _ in HOURLY_COLUMNS:
+                    row[name] = float(cols[name][i, h])
+                writer.writerow(row)
+                n += 1
+    return n
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site", required=True, type=Path,
@@ -81,12 +129,14 @@ def main() -> None:
                         help="Write per-day outputs as JSON to this path.")
     parser.add_argument("--csv", type=Path,
                         help="Write per-day outputs as CSV to this path.")
+    parser.add_argument("--hourly-csv", type=Path,
+                        help="Write per-hour diagnostics as CSV to this path.")
     parser.add_argument("--ndays", type=int, default=None,
                         help="Number of days to run (default: site.ndays).")
     args = parser.parse_args()
 
-    if not args.output and not args.csv:
-        parser.error("specify at least one of --output / --csv")
+    if not args.output and not args.csv and not args.hourly_csv:
+        parser.error("specify at least one of --output / --csv / --hourly-csv")
 
     ref = json.loads(args.site.read_text(encoding="utf-8"))
     ndays = args.ndays or ref["site"]["ndays"]
@@ -95,7 +145,7 @@ def main() -> None:
     if ndays > available:
         parser.error(f"--ndays {ndays} exceeds available {available} days in site file")
 
-    records = run_site(ref, ndays)
+    records, out = run_site(ref, ndays)
 
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -111,6 +161,11 @@ def main() -> None:
         args.csv.parent.mkdir(parents=True, exist_ok=True)
         write_csv(records, args.csv)
         print(f"[run_site] Wrote {args.csv} ({len(records)} days)")
+
+    if args.hourly_csv:
+        args.hourly_csv.parent.mkdir(parents=True, exist_ok=True)
+        n = write_hourly_csv(out, ref, ndays, args.hourly_csv)
+        print(f"[run_site] Wrote {args.hourly_csv} ({n} hours)")
 
 
 if __name__ == "__main__":
