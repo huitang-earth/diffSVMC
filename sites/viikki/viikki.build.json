@@ -1,0 +1,104 @@
+{
+  "site": {
+    "name": "Viikki",
+    "latitude": 60.2193,
+    "longitude": 25.0208,
+    "reference": "Viikki field site, Helsinki — FieldObs_viikki 2026 (ERA timeshift)",
+    "start_date": "2026-01-01",
+    "end_date_exclusive": "2026-06-01"
+  },
+  "forcing": {
+    "hourly": {
+      "file_pattern": "input/FieldObs_viikki.{year}.hr.timeshift_era.nc",
+      "years": [2026],
+      "time_var": "time",
+      "cell_index": 0,
+      "variables": {
+        "temp_hr": "air_temperature",
+        "rg_hr": "surface_downwelling_shortwave_flux_in_air",
+        "prec_hr": "precipitation_flux",
+        "vpd_hr": "water_vapor_saturation_deficit",
+        "pres_hr": "air_pressure",
+        "co2_hr": "mole_fraction_of_carbon_dioxide_in_air",
+        "wind_hr": "wind_speed"
+      }
+    },
+    "daily": [
+      {
+        "file_pattern": "input/FieldObs_viikki.{year}.lai.gp.nc",
+        "years": [2026],
+        "time_var": "time",
+        "cell_index": 0,
+        "variables": {
+          "lai_day": "LAI"
+        }
+      },
+      {
+        "file_pattern": "input/FieldObs_viikki.{year}.management.nc",
+        "years": [2026],
+        "time_var": "time",
+        "cell_index": 0,
+        "variables": {
+          "manage_type": "management_type",
+          "manage_c_in": "management_c_input",
+          "manage_c_out": "management_c_output"
+        }
+      }
+    ]
+  },
+  "defaults": {
+    "pft_type_code": 1,
+    "opt_hypothesis": "PM",
+    "obs_lai": true,
+    "obs_soilmoist": false,
+    "obs_snowdepth": false,
+    "conductivity": 5e-17,
+    "psi50": -2,
+    "b": 2.0,
+    "alpha": 0.06,
+    "gamma": 5.0,
+    "rdark": 0.015,
+    "soil_depth": 0.6,
+    "max_poros": 0.54,
+    "fc": 0.29,
+    "wp": 0.09,
+    "ksat": 2e-6,
+    "cratio_resp": 5e-8,
+    "cratio_leaf": 0.6,
+    "cratio_root": 0.4,
+    "cratio_biomass": 0.42,
+    "harvest_index": 0.8,
+    "turnover_cleaf": 0.03,
+    "turnover_croot": 0.004,
+    "sla": 10.0,
+    "q10": 2.0,
+    "invert_option": 1,
+    "yasso_totc": 16.0,
+    "yasso_cn_input": 50.0,
+    "yasso_fract_root": 0.4,
+    "yasso_fract_legacy": 0.3,
+
+    "maxpond": 0.0,
+    "n_van": 1.18,
+    "watres": 0.0,
+    "alpha_van": 3.35,
+    "watsat": 0.54,
+    "wmax": 0.5,
+    "wmaxsnow": 4.5,
+    "hc": 0.6,
+    "w_leaf": 0.01,
+    "rw": 0.20,
+    "rwmin": 0.02,
+    "gsoil": 5e-3,
+    "kmelt": 2.8934e-05,
+    "kfreeze": 5.79e-6,
+    "frac_snowliq": 0.05,
+    "zmeas": 2.0,
+    "zground": 0.1,
+    "zo_ground": 0.01,
+
+    "yasso_tempr_c": 5.67,
+    "yasso_tempr_ampl": 23.5,
+    "yasso_precip_day": 1.76
+  }
+}
