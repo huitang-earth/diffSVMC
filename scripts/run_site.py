@@ -51,6 +51,8 @@ HOURLY_COLUMNS = (
     ("Transp", "transp"),
     ("CanopyEvap", "canopy_evap"),
     ("GroundEvap", "ground_evap"),
+    ("SoilMoist", "soil_moist"),
+    ("SoilMoistPot", "soil_moist_pot"),
 )
 
 

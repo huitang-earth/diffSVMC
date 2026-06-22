@@ -119,6 +119,8 @@ class HourlyOutput(NamedTuple):
     transp: jax.Array               # transpiration flux (mm s-1)
     canopy_evap: jax.Array          # canopy evaporation flux (mm s-1)
     ground_evap: jax.Array          # ground/soil evaporation flux (mm s-1)
+    soil_moist: jax.Array           # soil water content Wliq (after the step)
+    soil_moist_pot: jax.Array       # soil water potential Psi (after the step)
 
 
 class DailyOutput(NamedTuple):
@@ -464,6 +466,8 @@ def _make_hourly_step(
             transp=tr_spafhy / step_seconds,
             canopy_evap=cw_flux.CanopyEvap / step_seconds,
             ground_evap=cw_flux.SoilEvap / step_seconds,
+            soil_moist=new_sw_state.Wliq,
+            soil_moist_pot=new_sw_state.Psi,
         )
         return new_carry, hourly_out
 

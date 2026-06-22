@@ -312,6 +312,8 @@ One row per hour, with `timestamp, day, hour` followed by these columns:
 | `Transp` | transpiration flux | mm s⁻¹ |
 | `CanopyEvap` | canopy evaporation flux | mm s⁻¹ |
 | `GroundEvap` | soil/ground evaporation flux | mm s⁻¹ |
+| `SoilMoist` | soil water content (`Wliq`) | m³ m⁻³ |
+| `SoilMoistPot` | soil water potential (`Psi`) | MPa |
 
 ```bash
 column -t -s, sites/viikki/results/viikki_hourly.csv | head -5
