@@ -101,6 +101,11 @@ def build_run_inputs(ref: Mapping[str, Any], ndays: int):
         daily_manage_type=jnp.array([float(x) for x in daily["manage_type"][:ndays]]),
         daily_manage_c_in=jnp.array(daily["manage_c_in"][:ndays]),
         daily_manage_c_out=jnp.array(daily["manage_c_out"][:ndays]),
+        daily_soilmoist=(
+            jnp.array(daily["soilmoist_day"][:ndays], dtype=float)
+            if "soilmoist_day" in daily
+            else jnp.full((ndays,), jnp.nan)
+        ),
     )
     params = IntegrationParams(
         phydro=PhydroRunParams(
@@ -159,6 +164,7 @@ def build_run_inputs(ref: Mapping[str, Any], ndays: int):
             yasso_tempr_ampl=_param(defaults, "yasso_tempr_ampl"),
         ),
         pft_is_oat=_param(defaults, "pft_is_oat"),
+        obs_soilmoist=1.0 if defaults.get("obs_soilmoist", False) else 0.0,
     )
     return forcing, params
 
@@ -178,6 +184,8 @@ def build_run_kwargs(ref: Mapping[str, Any], ndays: int) -> dict[str, Any]:
         "daily_manage_type": forcing.daily_manage_type,
         "daily_manage_c_in": forcing.daily_manage_c_in,
         "daily_manage_c_out": forcing.daily_manage_c_out,
+        "daily_soilmoist": forcing.daily_soilmoist,
+        "obs_soilmoist": params.obs_soilmoist,
         "conductivity": params.phydro.conductivity,
         "psi50": params.phydro.psi50,
         "b_param": params.phydro.b_param,

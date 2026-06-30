@@ -104,6 +104,7 @@ class DailyForcing(NamedTuple):
     management_type: jax.Array # scalar — management type (0-4)
     management_c_in: jax.Array # scalar
     management_c_out: jax.Array  # scalar
+    soilmoist: jax.Array       # scalar — observed volumetric soil moisture (NaN if none)
 
 
 class HourlyOutput(NamedTuple):
@@ -151,6 +152,7 @@ class IntegrationForcing(NamedTuple):
     daily_manage_type: jax.Array   # (n_days,)
     daily_manage_c_in: jax.Array   # (n_days,)
     daily_manage_c_out: jax.Array  # (n_days,)
+    daily_soilmoist: jax.Array   # (n_days,) observed volumetric soil moisture (NaN if none)
 
 
 class PhydroRunParams(NamedTuple):
@@ -223,6 +225,7 @@ class IntegrationParams(NamedTuple):
     allocation: AllocationRunParams
     yasso: YassoInitParams
     pft_is_oat: float
+    obs_soilmoist: float = 0.0   # 1.0 → feed observed soil moisture into P-Hydro's psi_soil
 
 
 # ── Initialization ────────────────────────────────────────────────────
@@ -235,6 +238,7 @@ def _to_daily_forcing(forcing: IntegrationForcing) -> DailyForcing:
         management_type=forcing.daily_manage_type,
         management_c_in=forcing.daily_manage_c_in,
         management_c_out=forcing.daily_manage_c_out,
+        soilmoist=forcing.daily_soilmoist,
     )
 
 
@@ -319,8 +323,15 @@ def _make_hourly_step(
     alpha: float,
     gamma_cost: float,
     phydro_optimizer: str,
+    psi_soil_obs: jax.Array,
+    use_obs_psi: jax.Array,
 ):
-    """Return a scan-compatible hourly step function closed over static params."""
+    """Return a scan-compatible hourly step function closed over static params.
+
+    When ``use_obs_psi`` is true, the P-Hydro soil water potential is taken from
+    ``psi_soil_obs`` (derived from observed soil moisture) instead of the
+    prognostic ``sw_state.Psi``. The prognostic soil-water bucket is unaffected.
+    """
 
     time_step_arr = jnp.asarray(_TIME_STEP)
     smoothing_alpha = jnp.asarray([_ALPHA_SMOOTH1, _ALPHA_SMOOTH2])
@@ -347,7 +358,10 @@ def _make_hourly_step(
         tc = temp_k - 273.15
 
         # ── P-Hydro ──
-        psi_soil = carry.sw_state.Psi
+        # Optionally use observed-soil-moisture-derived psi_soil (obs_soilmoist),
+        # otherwise the prognostic root-zone potential. Only the P-Hydro input is
+        # affected; the soil-water bucket below evolves prognostically either way.
+        psi_soil = jnp.where(use_obs_psi, psi_soil_obs, carry.sw_state.Psi)
         # PPFD: rg * 2.1 / LAI (same as Fortran harness)
         ppfd = rg * 2.1 / jnp.maximum(lai, _LAI_GUARD)
         co2_ppm = co2 * 1.0e6
@@ -504,6 +518,8 @@ def _make_daily_step(
     yasso_param: jax.Array,
     # PFT flag
     pft_is_oat: float,
+    # Observed soil moisture coupling (1.0 → feed obs into P-Hydro psi_soil)
+    obs_soilmoist: float = 0.0,
 ):
     """Return a scan-compatible daily step function."""
 
@@ -520,11 +536,25 @@ def _make_daily_step(
     q10_arr = jnp.asarray(q10)
     invert_option_arr = jnp.float64(invert_option)
     pft_is_oat_arr = jnp.asarray(pft_is_oat)
+    obs_soilmoist_arr = jnp.asarray(obs_soilmoist)
 
     def daily_step(carry: DailyCarry, forcing: DailyForcing) -> tuple[DailyCarry, DailyOutput]:
         lai = forcing.lai
         delta_lai = lai - carry.lai_prev
         fapar = 1.0 - jnp.exp(-_K_EXT * lai)
+
+        # ── Observed soil moisture → P-Hydro psi_soil (obs_soilmoist option) ──
+        # Use the observation only when enabled and the value is present/physical;
+        # otherwise fall back to the prognostic Psi (handled in the hourly step).
+        soilmoist_obs = forcing.soilmoist
+        use_obs_psi = (
+            (obs_soilmoist_arr > 0.5)
+            & jnp.isfinite(soilmoist_obs)
+            & (soilmoist_obs > 0.0)
+        )
+        # Guard the retention-curve input so missing/disabled days never inject NaN.
+        soilmoist_safe = jnp.where(use_obs_psi, soilmoist_obs, 0.5 * max_poros)
+        psi_soil_obs = soil_water_retention_curve(soilmoist_safe, soil_params)
 
         # Build hourly step for this day's LAI
         hourly_step = _make_hourly_step(
@@ -535,6 +565,7 @@ def _make_daily_step(
             psi50=psi50, b_param=b_param,
             alpha=alpha, gamma_cost=gamma_cost,
             phydro_optimizer=phydro_optimizer,
+            psi_soil_obs=psi_soil_obs, use_obs_psi=use_obs_psi,
         )
 
         # Initialize hourly carry with zeroed accumulators
@@ -789,6 +820,7 @@ def run_integration_grouped(
         invert_option=params.allocation.invert_option,
         yasso_param=params.yasso.yasso_param,
         pft_is_oat=params.pft_is_oat,
+        obs_soilmoist=params.obs_soilmoist,
     )
 
     final_carry, daily_outputs = jax.lax.scan(
@@ -866,6 +898,8 @@ def run_integration(
     yasso_precip_day: float,
     yasso_tempr_ampl: float,
     phydro_optimizer: str = "projected_lbfgs",
+    daily_soilmoist: jax.Array = None,  # (n_days,) observed soil moisture; None → disabled
+    obs_soilmoist: float = 0.0,         # 1.0 → feed obs into P-Hydro psi_soil
 ) -> tuple[DailyCarry, DailyOutput]:
     """Run the full SVMC integration loop.
 
@@ -887,6 +921,10 @@ def run_integration(
         daily_manage_type=daily_manage_type,
         daily_manage_c_in=daily_manage_c_in,
         daily_manage_c_out=daily_manage_c_out,
+        daily_soilmoist=(
+            jnp.full_like(jnp.asarray(daily_lai, dtype=float), jnp.nan)
+            if daily_soilmoist is None else daily_soilmoist
+        ),
     )
     params = IntegrationParams(
         phydro=PhydroRunParams(
@@ -945,6 +983,7 @@ def run_integration(
             yasso_tempr_ampl=yasso_tempr_ampl,
         ),
         pft_is_oat=pft_is_oat,
+        obs_soilmoist=obs_soilmoist,
     )
     return run_integration_grouped(
         forcing,
